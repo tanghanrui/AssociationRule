@@ -1,0 +1,95 @@
+---
+title: "Uncovering patterns in college data with association rules"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(arules)
+
+```
+
+read data
+```{r}
+setwd("/Users/hanrui/Desktop/Data Analyst/UW Data Analytics Certificate/Data Mining and Predictive Analytics/datasets")
+colleges = read.delim("colleges.tsv", sep = "\t", header = TRUE)
+
+# explore the data
+# 7308 observations and 81 variables
+summary(colleges)
+glimpse(colleges)
+
+# omit missing values
+colleges1 = colleges %>% na.omit()
+
+ggpairs(select(colleges1, cost, family_income_median, unemployment_rate, median_earnings))
+
+ggplot(colleges1, aes(x = family_income_median, y = median_earnings)) +
+                    geom_point() +
+                    facet_wrap(~control)
+
+```
+
+Prepare your data for association rule mining by transforming it into a set of transactions. 
+```{r}
+# discretize: make continious variable discrete
+colleges$cost_quartiles = discretize(colleges$cost, 
+                                     method = 'frequency', 
+                                     categories = 4, 
+                                     labels = c('cost_Q1', 'cost_Q2', 'cost_Q3', 'cost_Q4'))
+
+colleges$earnings_quartiles = discretize(colleges$median_earnings, 
+                                         method = "frequency", 
+                                         categories = 4, 
+                                         labels = c("earnings_Q1", "earnings_Q2", "earnings_Q3", "earnings_Q4"))
+
+colleges$debt_quartiles = discretize(colleges$median_debt, 
+                                     method = "frequency", 
+                                     categories = 4, 
+                                     labels = c("debt_Q1", "debt_Q2", "debt_Q3", "debt_Q4"))
+
+# feature engineering
+# STEM schools
+colleges = colleges %>% mutate(stem_perc = architecture_major_perc + comm_tech_major_perc +
+                                 computer_science_major_perc + engineering_major_perc +
+                                 eng_tech_major_perc + bio_science_major_perc +
+                                 math_stats_major_perc, 
+                               high_stem = ifelse(stem_perc >= 0.30, TRUE, FALSE))
+
+avg =colleges %>%
+       na.omit() %>%
+       group_by(high_stem) %>%
+       summarize(avg_earnings = mean(median_earnings))
+
+# plot the relationship between STEM major percentages and median earnings
+ggplot(na.omit(colleges), aes(x = median_earnings, fill = high_stem)) + 
+            geom_histogram(alpha = 0.60) +
+            geom_vline(data = avg, aes(xintercept = avg_earnings, color = high_stem))
+
+# construct rules
+colleges_features = 
+   colleges %>%
+     select(locale, control, pred_deg, historically_black, men_only, women_only, 
+            religious, online_only, cost_quartiles, earnings_quartiles, debt_quartiles, high_stem, top_ten)
+
+# make transactions
+colleges_trans = as(colleges_features, 'transactions')
+
+inspect(colleges_trans[1])
+summary(colleges_trans)
+
+# plot item frequency
+itemFrequencyPlot(colleges_trans, topN = 10, cex = 0.70)
+```   
+
+Generate rules with the apriori function with a support of 0.01 and a confidence of 0.60. 
+```{r}
+# construct rules
+rules = apriori(colleges_trans, 
+                parameter = list(sup = 0.01, conf = 0.6, target = 'rules'))
+
+inspect(head(rules))
+```
+
